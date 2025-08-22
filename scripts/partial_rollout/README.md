@@ -16,7 +16,7 @@ docker run -it \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
   -w $PWD \
-  yushengsuthu/slime:slime_ubuntu22.04_rocm6.3.4-patch-numa-patch_sglang0.4.9_megatron-core-patch_ray2.47.1_apex_torch-memory-saver0.0.8-patch
+  rlsys/slime:slime_ubuntu22.04_rocm6.3.4-patch-numa-patch_sglang0.4.9_megatron-patch_ray2.47.1_apex_torch-memory-saver0.0.8-patch-vim
   /bin/bash
 ```
 

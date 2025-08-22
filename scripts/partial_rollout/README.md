@@ -23,7 +23,8 @@ docker run -it \
 ## Clone Repo
 
 ```
-git clone https://github.com/zyzshishui/slime_.git
+git clone git@github.com:RLsys-Foundation/slime-partial-rollout.git
+cd slime-partial-rollout
 ```
 
 ## Setup Environment

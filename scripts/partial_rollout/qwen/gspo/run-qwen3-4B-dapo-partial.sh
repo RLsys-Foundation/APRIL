@@ -116,7 +116,7 @@ PERF_ARGS=(
    --max-tokens-per-gpu 9216
 )
 
-GEPO_ARGS=(
+GSPO_ARGS=(
    --advantage-estimator gspo
    --use-kl-loss
    --kl-loss-coef 0.00
@@ -196,7 +196,7 @@ ray job submit --address="http://127.0.0.1:8265" \
    ${CKPT_ARGS[@]} \
    ${ROLLOUT_ARGS[@]} \
    ${OPTIMIZER_ARGS[@]} \
-   ${GRPO_ARGS[@]} \
+   ${GSPO_ARGS[@]} \
    ${DISTRIBUTED_ARGS[@]} \
    ${WANDB_ARGS[@]} \
    ${PERF_ARGS[@]} \

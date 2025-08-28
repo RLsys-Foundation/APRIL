@@ -95,7 +95,7 @@ ROLLOUT_ARGS=(
 EVAL_ARGS=(
    --eval-interval 10
    --eval-prompt-data aime ${DATA_DIR}/aime-2024/aime-2024.jsonl
-   --n-samples-per-eval-prompt 4
+   --n-samples-per-eval-prompt 16
    --eval-max-response-len 16384
    --eval-top-p 0.7
 )
@@ -138,7 +138,7 @@ OPTIMIZER_ARGS=(
 
 WANDB_ARGS=(
    --use-wandb
-   --wandb-project 4B-amd
+   --wandb-project APRIL
    --wandb-group dapo-qwen3-4B-dapo-partial
    --wandb-key ${WANDB_API_KEY}
 )
@@ -151,7 +151,7 @@ WANDB_ARGS=(
 # )
 SGLANG_ARGS=(
    --rollout-num-gpus-per-engine 2
-   --sglang-mem-fraction-static 0.4
+   --sglang-mem-fraction-static 0.6
 )
 ####################
 

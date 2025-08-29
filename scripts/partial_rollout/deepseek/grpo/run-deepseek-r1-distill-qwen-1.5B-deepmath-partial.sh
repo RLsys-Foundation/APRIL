@@ -1,7 +1,7 @@
 #!/bin/bash
 
 
-# bash scripts/run-qwen3-4B-amd.sh
+# bash scripts/partial_rollout/deepseek/dapo/run-deepseek-r1-distill-qwen-1.5B-dapo-partial.sh
 
 
 ####clear before training
@@ -59,19 +59,19 @@ export PYTHONBUFFERED=16
 
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)"
-source "${SCRIPT_DIR}/../../../models/qwen3-4B.sh"
+source "${SCRIPT_DIR}/../../../models/deepseek-r1-distill-qwen-1.5B.sh"
 
 CKPT_ARGS=(
-   --hf-checkpoint ${MODEL_DIR}/Qwen3-4B
+   --hf-checkpoint ${MODEL_DIR}/DeepSeek-R1-Distill-Qwen-1.5B
    #--hf-checkpoint /root/Qwen3-4B-FP8
-   --ref-load ${MODEL_DIR}/Qwen3-4B_torch
-   --load ${MODEL_DIR}/Qwen3-4B_slime/
-   --save ${MODEL_DIR}/Qwen3-4B_slime/
+   --ref-load ${MODEL_DIR}/DeepSeek-R1-Distill-Qwen-1.5B_torch
+   --load ${MODEL_DIR}/DeepSeek-R1-Distill-Qwen-1.5B_slime/
+   --save ${MODEL_DIR}/DeepSeek-R1-Distill-Qwen-1.5B_slime/
    --save-interval 20000
 )
 
 ROLLOUT_ARGS=(
-   --prompt-data ${DATA_DIR}/dapo-math-17k/dapo-math-17k.jsonl
+   --prompt-data ${DATA_DIR}/DeepMath-103K/deepmath-103k.jsonl
    --input-key prompt
    --label-key label
    --apply-chat-template
@@ -117,7 +117,7 @@ PERF_ARGS=(
 )
 
 GRPO_ARGS=(
-   --advantage-estimator gspo
+   --advantage-estimator grpo
    --use-kl-loss
    --kl-loss-coef 0.00
    --kl-loss-type low_var_kl
@@ -138,7 +138,7 @@ OPTIMIZER_ARGS=(
 WANDB_ARGS=(
    --use-wandb
    --wandb-project APRIL
-   --wandb-group dapo-qwen3-4B-gspo-partial
+   --wandb-group deepmath-deepseek-r1-distill-qwen-1.5B-grpo-partial
    --wandb-key ${WANDB_API_KEY}
 )
 

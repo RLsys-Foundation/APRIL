@@ -16,15 +16,14 @@ docker run -it \
   --ulimit memlock=-1 \
   --ulimit stack=67108864 \
   -w $PWD \
-  rlsys/slime:slime_ubuntu22.04_rocm6.3.4-patch-numa-patch_sglang0.4.9_megatron-patch_ray2.47.1_apex_torch-memory-saver0.0.8-patch-vim
+  rlsys/slime_bkp:latest
   /bin/bash
 ```
 
 ## Clone Repo
 
 ```
-git clone git@github.com:RLsys-Foundation/slime-partial-rollout.git
-cd slime-partial-rollout
+git clone https://github.com/zyzshishui/slime_.git
 ```
 
 ## Setup Environment
@@ -57,6 +56,9 @@ huggingface-cli download --repo-type dataset zhuzilin/dapo-math-17k --local-dir 
 
 # DeepScaler
 huggingface-cli download --repo-type dataset  zyzshishui0627/DeepScaleR-openai-format --local-dir /root/DeepScaleR
+
+# DeepMath
+huggingface-cli download --repo-type dataset zyzshishui0627/DeepMath-103K-openai-format --local-dir /root/DeepMath-103K
 
 # aime(eval)
 huggingface-cli download --repo-type dataset zhuzilin/aime-2024 --local-dir /root/aime-2024

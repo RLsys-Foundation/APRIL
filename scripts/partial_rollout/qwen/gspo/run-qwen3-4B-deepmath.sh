@@ -71,7 +71,7 @@ CKPT_ARGS=(
 )
 
 ROLLOUT_ARGS=(
-   --prompt-data ${DATA_DIR}/dapo-math-17k/dapo-math-17k.jsonl
+   --prompt-data ${DATA_DIR}/DeepMath-103K/deepmath-103k.jsonl
    --input-key prompt
    --label-key label
    --apply-chat-template
@@ -87,8 +87,8 @@ ROLLOUT_ARGS=(
 
    --global-batch-size 256
    --balance-data
-   --partial-rollout
-   --over-sampling-batch-size 64
+   # --partial-rollout
+   # --over-sampling-batch-size 64
 )
 
 EVAL_ARGS=(
@@ -138,7 +138,7 @@ OPTIMIZER_ARGS=(
 WANDB_ARGS=(
    --use-wandb
    --wandb-project APRIL
-   --wandb-group dapo-qwen3-4B-gspo-partial
+   --wandb-group deepmath-qwen3-4B-gspo
    --wandb-key ${WANDB_API_KEY}
 )
 

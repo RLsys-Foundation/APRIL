@@ -79,6 +79,7 @@ For other options, see the arguments in [arguments.py](https://chatgpt.com/c/sli
 |DeepScaleR|Qwen3-4B|Rollout Throughput|**+21%**|
 |DeepMath-103K|Qwen3-4B|Rollout Throughput|**+35%**|
 |AIME-2024|Various|Final Accuracy|**+2–5%** (data/algorithm-dependent)|
+
 ![evaluation](./imgs/eval_dapo_qwen.png)
 ## FAQ
 

@@ -69,6 +69,8 @@ partial rollout 的核心功能集中在如下参数
 | DeepMath‑103K | Qwen3‑4B | Rollout 吞吐 | **+35%**            |
 | AIME‑2024     | 多设置      | 最终准确率      | **+2–5%**（视数据/算法而定） |
 
+![evaluation](./imgs/eval_dapo_qwen.png)
+
 ## 常见问答（FAQ）
 
 - **Q：APRIL 会不会影响策略纯度与收敛？**

@@ -1,6 +1,8 @@
 
 # APRIL: Active Partial Rollouts in Reinforcement Learning to Tame Long-Tail Generation
 
+[Chinese Version](./README_zh.md)
+
 ## About
 
 ### Background: Why synchronous RL sampling–training loops suffer from “long tails”

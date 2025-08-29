@@ -57,6 +57,9 @@ huggingface-cli download --repo-type dataset zhuzilin/dapo-math-17k --local-dir 
 # DeepScaler
 huggingface-cli download --repo-type dataset  zyzshishui0627/DeepScaleR-openai-format --local-dir /root/DeepScaleR
 
+# DeepMath
+huggingface-cli download --repo-type dataset zyzshishui0627/DeepMath-103K-openai-format --local-dir /root/DeepMath-103K
+
 # aime(eval)
 huggingface-cli download --repo-type dataset zhuzilin/aime-2024 --local-dir /root/aime-2024
 ```

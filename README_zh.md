@@ -1,199 +1,107 @@
-# slime
+# APRIL: Active Partial Rollouts in ReInforcement Learning to tame long-tail generation
+## 关于
+### 背景：同步 RL 的采样–训练闭环为何被“长尾”拖累
 
-[English](./README.md)
+- 在 on‑policy 的 RLHF/GRxO 训练中，系统按“轮”（round）收集 **N** 条 rollout 样本后才能进入一次更新。由于生成长度、拒答/重试、路由排队等随机性，单轮时长由**最慢的少数样本**决定（典型长尾分布），GPU 在等待“尾巴”时空转、有效吞吐被拖慢。
+    
+- 常见缓解手段（加大超时/截断、提高并发、上更快的解码内核/连续批处理，或改为异步 RL）各有代价：要么牺牲样本质量与策略一致性，要么改变训练假设、调度复杂度陡增，而且仍无法从根因上减少“等待未完样本”的浪费。
+    
+### 我们做了什么：Active Partial Rollout（APRIL）
 
-**slime** 是为 RL scaling 设计的 LLM post‑training 框架，提供两大核心能力：
+**核心思想**：在每轮**有计划地过量采样**（N' > N），一旦达成目标 **N** 条就**主动中断**拖后的请求；把**未完成的响应片段**（含上下文与解码状态）写入**跨轮缓冲**，并在下一轮**优先续写**，从而消灭“等尾巴”的无效时间。
+（TODO：加架构图）
+![scheduling](./imgs/partial_scheduling.png)
+### 亮点特性
 
-1. **高性能训练**：通过连接 Megatron 与 SGLang，支持各种模式的高效训练；
-2. **灵活的数据生成**：通过自定义数据生成接口以及 server based engine，实现任意的数据训练数据生成流程。
+- **长尾克星**：过量发起 N' > N 的 rollouts；当达成目标 N 后立刻中断剩余请求，将**未完成响应加入缓冲**，并在下一轮**优先续写**。
+- **稳态训练**：对 PPO/GRPO/DAPO/GSPO 等主流 on‑policy 变体友好，实践中保持甚至略有精度提升。
+- **工程无侵入**：作用于系统调度层，不修改解码/批处理内核；已与 **slime** 框架打通，NVIDIA/AMD 通用。
+- **算法兼容**：继续样本可能跨策略版本产生“轻微 off‑policy”，实践中未见不稳定，且常带来正向正则化效果（更快收敛、略增精度）。
 
-## 目录
+## 三步上手
 
-- [架构总览](#架构总览)
-- [快速开始](#快速开始)
-  - [环境准备](#环境准备)
-  - [示例](#示例)
-    - [Dense 模型示例：GLM-4-9B 与 Qwen3-4B](#Dense-模型示例GLM-4-9B-与-Qwen3-4B)
-    - [MoE 模型示例：Qwen3-30B-A3B 与 DeepSeek-R1](#MoE-模型示例Qwen3-30B-A3B-与-DeepSeek-R1)
-    - [多轮对话 + 工具调用示例：Search-R1 lite](#多轮对话--工具调用示例Search-R1-lite)
-    - [SFT 示例：Qwen3-4B-Base + OpenHermes-2.5](#SFT-示例Qwen3-4B-Base--OpenHermes-25)
-- [Checkpoint 格式转换](#checkpoint-格式转换)
-- [启动训练流程](#启动训练流程)
-- [参数说明](#参数说明)
-- [开发指南](#开发指南)
-- [常见 Q&A 与致谢](#常见-qa-与致谢)
+### 1) 环境准备
 
-## 架构总览
-
-![arch](./imgs/arch.png)
-
-**模块说明**：
-
-- **training (Megatron)**：负责主训练流程，从 Data Buffer 读取数据，训练完后将参数同步至 rollout 模块；
-- **rollout (SGLang + router)**：生成新数据（含 reward/verifier），存储至 Data Buffer；
-- **data buffer**：桥梁模块，管理 prompt 初始化、自定义数据与 rollout 生成方法。
-
-## 快速开始
-
-### 环境准备
-
-基于镜像 zhuzilin/slime:latest（已预装 SGLang 0.4.7 和 Megatron）：
-
+**推荐（Docker）**
+- AMD：
 ```bash
 docker run --rm --gpus all --ipc=host --shm-size=16g \
   --ulimit memlock=-1 --ulimit stack=67108864 \
-  -it zhuzilin/slime:latest /bin/bash
+  -it rlsys/slime:slime_ubuntu22.04_rocm6.3.4-patch-numa-patch_sglang0.4.9_megatron-patch_ray2.47.1_apex_torch-memory-saver0.0.8-patch-vim /bin/bash
+```
+- Nvidia（TODO：找到对应的 docker 版本号）：
+### 2) 安装 APRIL
 
-git clone https://github.com/THUDM/slime.git
-cd slime
+```bash
+git clone https://github.com/RLsys-Foundation/APRIL.git
+cd APRIL
 pip install -e .
 ```
 
-- 对于不方便使用 docker 的场景，请参考 [从零搭建环境](./docs/zh/build.md)；
-- 对于 AMD 支持，请参考 [AMD 使用教程](./docs/en/amd_tutorial.md)。
+若使用源码内的示例脚本，确保已安装 `ray` 与可用的推理后端（SGLang/vLLM 二选一，推荐 SGLang）。
+### 3) 运行实例
 
-### 示例
-
-#### Dense 模型示例：GLM-4-9B 与 Qwen3-4B
-
-我们提供了 [GLM-4-9B](https://huggingface.co/THUDM/GLM-Z1-9B-0414) 和 [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B) 的使用示例，可以通过他们对 slime 的使用方法有个基本的了解：
-
-- [示例：GLM-4-9B](docs/zh/models/glm4-9B.md)
-- [示例：Qwen3-4B](docs/zh/models/qwen3-4B.md)
-
-#### MoE 模型示例：Qwen3-30B-A3B 与 DeepSeek-R1
-
-我们也提供了 MoE 模型的示例，请查看：
-
-- [示例：Qwen3-30B-A3B](docs/zh/models/qwen3-30B-A3B.md)
-- [示例：128xH100 训练 DeepSeek-R1](docs/zh/models/deepseek-r1.md)
-
-#### 多轮对话 + 工具调用示例：Search-R1 lite
-
-针对多轮对话和工具调用场景，我们提供了一个简化版的 Search-R1 复现，请查看：
-
-- [示例：Search-R1 lite](examples/search-r1/README_zh.md)
-
-#### SFT 示例：Qwen3-4B-Base + OpenHermes-2.5
-
-slime is not just a RL framework, we support a diverse set of post-training setups. For an SFT example, please refer to:
-
-slime 不仅仅是一个 RL 框架，我们还支持了各种后训练流程。如果想使用 SFT，请参看：
-
-- [示例: Qwen3-4B-Base + OpenHermes-2.5](docs/zh/sft.md).
-
-### Checkpoint 格式转换
-
-由于 slime 使用 megatron，而 megatron 不支持加载 huggingface checkpoint，我们需要将模型转换至 megatron 可以支持的 torch_dist 格式。
-
-#### HF → Megatron torch_dist ckpt
-
-我们推荐使用 [Pai-Megatron-Patch](https://github.com/alibaba/Pai-Megatron-Patch) 进行转换。如果你目前在使用的模型不被 Pai-Megatron-Patch 支持，可以使用 [mbridge](https://github.com/ISEEKYAN/mbridge.git) 转换：
+_脚本会：启动后端 → 发起过量 rollouts → 达标即中断 → 将未完成的样本写入缓冲并在下一轮续写 → 打印单轮吞吐/时延对比。_
 
 ```bash
-cd slime/
-PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
-    --hf-checkpoint /root/GLM-Z1-9B-0414 \
-    --save /root/GLM-Z1-9B-0414_torch_dist
+bash scripts/partial_rollout/qwen/grpo/run-qwen3-4B-dapo-partial.sh
 ```
+### 4) 参数详解
 
-⚠️  如果出现找不到 slime 的问题，请在 slime 目录下 `pip install -e .`。
-
-#### Megatron torch_dist → HF ckpt
-
-将训练过程中的存储的 torch_dist ckpt 转为 hf ckpt：
-
+partial rollout 的核心功能集中在如下参数
 ```bash
-cd slime/
-PYTHONPATH=/root/Megatron-LM python tools/convert_torch_dist_to_hf.py \
-  --input-dir /path/to/torch_dist_ckpt/iter_xxx/ \
-  --output-dir /root/GLM-Z1-9B-0414-iter_xxx \
-  --origin-hf-dir /root/GLM-Z1-9B-0414
+# 开启 partial rollout 功能
+# 设置该参数来启用 rollout 时的数量达标中断生成 + 未完成样本回收机制
+--partial-rollout
+
+# 采样的 batch size 大小。该参数控制单轮的采样粒度。
+# 若该参数 > rollout_batch_size，则进行过采样
+# 若改参数 < rollout_batch_size，会持续不断按该粒度进行采样，直到收集到 rollout_batch_size 个样本
+--over-sampling-batch-size 16
 ```
+其他参数，可参考 [arguments.py](./slime/utils/arguments.py) 的参数进行配置，更多细节可以参考 [slime](https://github.com/THUDM/slime) 原仓库。
+## 结果与对照（精简版）
 
-⚠️ 由于 mbridge 转换的 torch_dist ckpt 目前不保存 args，不能基于上一步的 torch_dist ckpt 反转回 HF。
+| Dataset       | Model    | Metric     | APRIL 相对基线          |
+| ------------- | -------- | ---------- | ------------------- |
+| DAPO‑Math‑17k | Qwen3‑4B | Rollout 吞吐 | **+17%**            |
+| DeepScaleR    | Qwen3‑4B | Rollout 吞吐 | **+21%**            |
+| DeepMath‑103K | Qwen3‑4B | Rollout 吞吐 | **+35%**            |
+| AIME‑2024     | 多设置      | 最终准确率      | **+2–5%**（视数据/算法而定） |
 
-#### 任意 Megatron ckpt → HF
+## 常见问答（FAQ）
 
-适用于自定义保存格式（如 `--ckpt-format torch`）。
+- **Q：APRIL 会不会影响策略纯度与收敛？**
+    
+    - A：从工程与实验看无显著不稳定，建议监控 off‑policy token 比例，并保持 `oversample ≈ 2× roll_batch` 的温和设置。
+        
+- **Q：需要改动解码内核吗？**
+    
+    - A：不需要。APRIL 作用在**系统调度层**，与 speculative decoding、continuous batching 等推理加速手段可叠加。
+        
+- **Q：NVIDIA/AMD 都能用吗？**
+    
+    - A：可以；我们在 8×H100 与 8×MI300 上均复现收益。
+        
+## 目录结构
 
-转化方式的原理是直接复用训练中，从 megatron 向 sglang 更新参数的函数，也就是直接复用一下训练脚本，将原先的：
-
-```bash
-ray job submit --address="http://127.0.0.1:8265" \
-   --runtime-env-json='{
-     "env_vars": { ...}
-   }' \
-   -- python3 train.py \
-   ... # 其他训练 args
 ```
+APRIL/
+├── scripts/
+│   └── partial_rollout/
+│       ├── deepseek/            # deepseek-r1-distill-1.5B 实验代码
+│       └── qwen/                # qwen3-4B 实验代码
+├── slime/
+│   ├── backends/
+│   ├── rollout/
+│   │   └── sglang_example.py    # 采样核心代码
+│   ├── ray/                     # 核心调度逻辑
+│   │   └── buffer.py            # 缓冲区代码实现
+│   └── utils/
+└── tools/                       # megatron 格式转换
 
-改成：
-
-```bash
-torchrun --nproc_per_node ${NUM_GPU} tools/convert_to_hf.py \
-   --load /your/saved/megatron_ckpt \
-   --output-dir /your/converted/hf_ckpt \
-   ... # 其他训练 args
 ```
+## 引用
 
-即，保持所有的参数不变，将：
-
-1. 任务启动从 ray 变成 torchrun，把 gpu 数量保存为 megatron 并行的不带 dp 的最小 gpu 数，例如如果是 tp4，就设成 4；
-2. 确认把 `--load` 改成了需要 load 的路径；
-3. 增加 `--output-dir` 对应要保存的 hf_ckpt。
-
-## 启动训练流程
-
-整个程序需要使用 ray 进行启动，首先需要启动一个 ray 集群，即在 node 0 运行：
-
-```bash
-# Node0（HEAD）
-ray start --head --node-ip-address ${MASTER_ADDR} \
-  --num-gpus 8 --disable-usage-stats
-
-# 其他 Node
-ray start --address=${MASTER_ADDR}:6379 --num-gpus 8
-```
-
-在 ray 集群启动后，可以在 node 0 提交任务，例如：
-
-```bash
-ray job submit --address="http://127.0.0.1:8265" \
-   --runtime-env-json='{
-     "env_vars": {
-        "PYTHONPATH": "/root/Megatron-LM/",
-        ... # e.g. no_proxy、接口变量等
-     }
-   }' \
-   -- python3 train.py \
-   --...（其他 Megatron/SGLang/slime 参数）
-```
-
-#### 参数说明
-
-参数分为三类：
-
-1. **megatron 参数**：slime 会读取 `PYTHONPATH` 中的 megatron 里设置的所有参数，可以通过传入如 `--tensor-model-parallel-size 2` 的方式配置 megatron；
-2. **sglang 参数**：支持环境中安装的 sglang 的所有参数，这些参数需要以 `--sglang` 起始，例如 `--mem-fraction-static` 需要通过 `--sglang-mem-fraction-static` 传入。
-3. **slime 自身的参数**：请见：[slime/utils/arguments.py](slime/utils/arguments.py)
-
-完整使用说明请查阅 [使用文档](docs/zh/usage.md)。
-
-## 开发指南
-
-- **欢迎贡献！** 若有功能建议、性能调优或使用体验反馈，欢迎提交 Issue / PR 😊
-
-- 使用 [pre-commit](https://pre-commit.com/) 保证提交代码风格：
-
-  ```bash
-  apt install pre-commit -y
-  pre-commit install
-  ```
-
-- 调试技巧请参考 [debug 指南](docs/zh/debug.md)
-
-## 常见 Q&A 与致谢
-
-- 常见问题请见 [Q&A](docs/zh/qa.md)
-- 特别感谢以下项目 & 社区：SGLang、Megatron‑LM、mbridge、OpenRLHF、veRL 等。
+若本项目对你有帮助，请在论文或项目中引用 APRIL 论文并给仓库加 ⭐。
+（TODO：论文 arxiv 链接）

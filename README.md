@@ -1,203 +1,116 @@
-# slime
 
-[中文版](./README_zh.md)
+# APRIL: Active Partial Rollouts in Reinforcement Learning to Tame Long-Tail Generation
 
-**slime** is an LLM post-training framework for RL scaling, providing two core capabilities:
+## About
 
-1.  **High-Performance Training**: Supports efficient training in various modes by connecting Megatron with SGLang;
-2.  **Flexible Data Generation**: Enables arbitrary training data generation workflows through custom data generation interfaces and server-based engines.
+### Background: Why synchronous RL sampling–training loops suffer from “long tails”
 
-## Table of Contents
+- In on-policy RLHF / GRxO training, the system collects **N** rollout samples per round before applying one update. Because generation lengths, refusals/retries, routing queues, etc. are stochastic, the round time is dominated by **the slowest few samples** (a classic long-tail). GPUs idle while “waiting for the tail,” dragging down effective throughput.
+- Common mitigations (larger timeouts/early truncation, higher concurrency, faster decoding kernels/continuous batching, or switching to asynchronous RL) all have trade-offs: they may hurt sample quality or policy consistency, complicate scheduling assumptions, or still fail to remove the root cause—**wasted time waiting on unfinished samples**.
+### What we built: Active Partial Rollout (APRIL)
 
-  - [Architecture Overview](#architecture-overview)
-  - [Quick Start](#quick-start)
-      - [Environment Setup](#environment-setup)
-      - [Examples](#examples)
-        - [Dense Model Examples: GLM-4-9B and Qwen3-4B](#Dense-Model-Examples-GLM-4-9B-and-Qwen3-4B)
-        - [MoE Model Example: Qwen3-30B-A3B and DeepSeek-R1](#MoE-Model-Example-Qwen3-30B-A3B-and-DeepSeek-R1)
-        - [Multi-Turn + Tool Calling Example: Search-R1 lite](#Multi-Turn--Tool-Calling-Example-Search-R1-lite)
-        - [SFT Example: Qwen3-4B-Base with OpenHermes-2.5](#SFT-Example-Qwen3-4B-Base-with-OpenHermes-25)
-  - [Checkpoint Format Conversion](#checkpoint-format-conversion)
-  - [Starting the Training Process](#starting-the-training-process)
-  - [Argument Descriptions](#argument-descriptions)
-  - [Developer Guide](#developer-guide)
-  - [FAQ & Acknowledgements](#faq--acknowledgements)
+**Core idea.** In each round, **oversample by design** (**N' > N**). As soon as the target **N** is met, **proactively abort** straggling requests; persist their **unfinished response segments** (with context and decoding state) into a **cross-round buffer**; and **resume them first** in the next round. This eliminates idle time spent “waiting for the tail.”  
+(TODO: add architecture diagram)
 
-## Architecture Overview
+![scheduling](./imgs/partial_scheduling.png)
 
-![arch](./imgs/arch.png)
+### Highlights
 
-**Module Descriptions**:
+- **Long-tail killer.** Launch N' > N rollouts; once N is reached, immediately abort the remainder, **buffer their partial responses**, and **resume them next round**.
+- **Stable training.** Plays nicely with mainstream on-policy variants like PPO/GRPO/DAPO/GSPO; in practice we observe comparable or slightly better accuracy.
+- **Low-intrusion engineering.** Operates at the scheduling layer without changing decoding/batching kernels; integrated with **slime**, and works on both NVIDIA and AMD.
+- **Algorithm-compatible.** Resuming samples can introduce a small amount of “light off-policy,” which we have not found to destabilize training; it often acts as a mild regularizer (faster convergence, slight accuracy gains).
+## Quickstart
 
-  - **training (Megatron)**: Responsible for the main training process, reads data from the Data Buffer, and synchronizes parameters to the rollout module after training.
-  - **rollout (SGLang + router)**: Generates new data (including rewards/verifier outputs) and stores it in the Data Buffer.
-  - **data buffer**: A bridge module that manages prompt initialization, custom data, and rollout generation methods.
+### 1) Environment
 
-## Quick Start
+**Recommended (Docker)**
 
-### Environment Setup
-
-Based on the `zhuzilin/slime:latest` image (pre-installed with SGLang 0.4.7 and Megatron):
+- **AMD**
 
 ```bash
 docker run --rm --gpus all --ipc=host --shm-size=16g \
   --ulimit memlock=-1 --ulimit stack=67108864 \
-  -it zhuzilin/slime:latest /bin/bash
+  -it rlsys/slime:slime_ubuntu22.04_rocm6.3.4-patch-numa-patch_sglang0.4.9_megatron-patch_ray2.47.1_apex_torch-memory-saver0.0.8-patch-vim /bin/bash
+```
 
-git clone https://github.com/THUDM/slime.git
-cd slime
+- **NVIDIA** (TODO: fill in the matching image tag)
+
+### 2) Install APRIL
+
+```bash
+git clone https://github.com/RLsys-Foundation/APRIL.git
+cd APRIL
 pip install -e .
 ```
 
-- If you prefer not to use Docker, or if it's inconvenient, please refer to [Setting up the Environment from Scratch](./docs/en/build.md).
-- For AMD support, please refer to [AMD Tutorial](./docs/en/amd_tutorial.md).
+If you plan to run the example scripts, make sure `ray` is installed and at least one inference backend is available (SGLang or vLLM; **SGLang recommended**).
 
-### Examples
+### 3) Run an example
 
-#### Dense Model Examples: GLM-4-9B and Qwen3-4B
-
-We provide examples to use [GLM-4-9B](https://huggingface.co/THUDM/GLM-Z1-9B-0414) and [Qwen3-4B](https://huggingface.co/Qwen/Qwen3-4B), please refer to:
-
-- [Example: GLM-4-9B](docs/en/models/glm4-9B.md).
-- [Example: Qwen3-4B](docs/en/models/qwen3-4B.md).
-
-#### MoE Model Example: Qwen3-30B-A3B and DeepSeek-R1
-
-For MoE example, please refer to:
-
-- [Example: Qwen3-30B-A3B](docs/en/models/qwen3-30B-A3B.md).
-- [Example: Training DeepSeek R1 with 128xH100](docs/en/models/deepseek-r1.md)
-
-#### Multi-Turn + Tool Calling Example: Search-R1 lite
-
-For multi-turn and tool calling, we also provides an minimal reimplenmentation of Search-R1, please refer to:
-
-- [Example: Search-R1 lite](examples/search-r1/README.md).
-
-#### SFT Example: Qwen3-4B-Base with OpenHermes-2.5
-
-slime is not just a RL framework, we support a diverse set of post-training setups. For an SFT example, please refer to:
-
-- [Example: Qwen3-4B-Base with OpenHermes-2.5](docs/en/sft.md).
-
-### Checkpoint Format Conversion
-
-Since slime uses Megatron, and Megatron does not support loading Hugging Face checkpoints directly, we need to convert the model to the `torch_dist` format that Megatron supports.
-
-#### HF → Megatron torch\_dist ckpt
-
-We recommend using [Pai-Megatron-Patch](https://github.com/alibaba/Pai-Megatron-Patch) for mcore checkpoint conversion.
-
-If the mode you are using are not supported by Pai-Megatron-Patch, you could use [mbridge](https://github.com/ISEEKYAN/mbridge.git) for conversion:
+_The script: starts the backend → launches oversampled rollouts → aborts once the target is met → writes unfinished samples to the buffer and resumes them next round → prints per-round throughput/latency._
 
 ```bash
-cd slime/
-PYTHONPATH=/root/Megatron-LM python tools/convert_hf_to_torch_dist.py \
-    --hf-checkpoint /root/GLM-Z1-9B-0414 \
-    --save /root/GLM-Z1-9B-0414_torch_dist
+bash scripts/partial_rollout/qwen/grpo/run-qwen3-4B-dapo-partial.sh
 ```
 
-⚠️ If you encounter an issue where slime cannot be found, please run `pip install -e .` in the slime directory.
+### 4) Parameters
 
-#### Megatron torch\_dist → HF ckpt
-
-To convert a `torch_dist` checkpoint saved during training back to a Hugging Face checkpoint:
+APRIL’s core behavior is controlled by the following flags:
 
 ```bash
-cd slime/
-PYTHONPATH=/root/Megatron-LM python tools/convert_torch_dist_to_hf.py \
-  --input-dir /path/to/torch_dist_ckpt/iter_xxx/ \
-  --output-dir /root/GLM-Z1-9B-0414-iter_xxx \
-  --origin-hf-dir /root/GLM-Z1-9B-0414
+# Enable partial rollout:
+# Turn on "meet target then abort" and reclaim unfinished samples into the buffer.
+--partial-rollout
+
+# Sampling batch size per shot. This controls the granularity of each sampling step.
+# If this > rollout_batch_size, you will oversample.
+# If this < rollout_batch_size, the system keeps sampling in chunks until the target is reached.
+--over-sampling-batch-size 16
 ```
 
-⚠️ Since the `torch_dist` checkpoint converted by mbridge does not currently save args, you cannot convert the checkpoint from the previous step back to HF format.
+For other options, see the arguments in [arguments.py](https://chatgpt.com/c/slime/utils/arguments.py). For more details, refer to the upstream [slime](https://github.com/THUDM/slime) repository.
 
-#### Any Megatron ckpt → HF
+## Results vs. Baselines (brief)
 
-Applicable for custom save formats (e.g., `--ckpt-format torch`).
+|Dataset|Model|Metric|APRIL vs. baseline|
+|---|---|---|---|
+|DAPO-Math-17k|Qwen3-4B|Rollout Throughput|**+17%**|
+|DeepScaleR|Qwen3-4B|Rollout Throughput|**+21%**|
+|DeepMath-103K|Qwen3-4B|Rollout Throughput|**+35%**|
+|AIME-2024|Various|Final Accuracy|**+2–5%** (data/algorithm-dependent)|
+![evaluation](./imgs/eval_dapo_qwen.png)
+## FAQ
 
-The principle behind this conversion method is to reuse the function that updates parameters from Megatron to SGLang during training. This means reusing the training script and changing the original command from:
+- **Q: Does APRIL hurt policy purity or convergence?**  
+    **A:** We have not observed instability in engineering or experiments. Monitor the off-policy token ratio, and use a mild setting like `oversample ≈ 2× roll_batch`.
+    
+- **Q: Do I need to modify decoding kernels?**  
+    **A:** No. APRIL operates at the **scheduling layer** and composes with speculative decoding, continuous batching, and other inference-level accelerations.
+    
+- **Q: Does it work on both NVIDIA and AMD?**  
+    **A:** Yes; we reproduced gains on 8×H100 and 8×MI300.
+    
 
-```bash
-ray job submit --address="http://127.0.0.1:8265" \
-   --runtime-env-json='{
-     "env_vars": { ...}
-   }' \
-   -- python3 train.py \
-   ... # Other training args
+## Repository Structure
+
+```text
+APRIL/
+├── scripts/
+│   └── partial_rollout/
+│       ├── deepseek/            # Experiment code for deepseek-r1-distill-1.5B
+│       └── qwen/                # Experiment code for Qwen3-4B
+├── slime/
+│   ├── backends/
+│   ├── rollout/
+│   │   └── sglang_example.py    # Core sampling example
+│   ├── ray/                     # Core scheduling logic
+│   │   └── buffer.py            # Buffer implementation
+│   └── utils/
+└── tools/                       # Megatron-format model conversion
 ```
 
-To:
+## Citation
 
-```bash
-torchrun --nproc_per_node ${NUM_GPU} tools/convert_to_hf.py \
-   --load /your/saved/megatron_ckpt \
-   --output-dir /your/converted/hf_ckpt \
-   ... # Other training args
-```
-
-That is, keep all other arguments the same, and:
-
-1.  Change the task launcher from `ray` to `torchrun`. Set the number of GPUs to the minimum required for Megatron's parallelism without data parallelism (DP). For example, if you are using `tp4`, set it to 4.
-2.  Make sure to change `--load` to the path of the checkpoint you want to load.
-3.  Add the `--output-dir` argument to specify where the converted Hugging Face checkpoint should be saved.
-
-## Starting the Training Process
-
-The entire program needs to be launched using Ray. First, you need to start a Ray cluster. On node 0, run:
-
-```bash
-# Node0 (HEAD)
-ray start --head --node-ip-address ${MASTER_ADDR} \
-  --num-gpus 8 --disable-usage-stats
-
-# Other Nodes
-ray start --address=${MASTER_ADDR}:6379 --num-gpus 8
-```
-
-After the Ray cluster has started, you can submit a job from node 0, for example:
-
-```bash
-ray job submit --address="http://127.0.0.1:8265" \
-   --runtime-env-json='{
-     "env_vars": {
-        "PYTHONPATH": "/root/Megatron-LM/",
-        ... # e.g., no_proxy, API variables, etc.
-     }
-   }' \
-   -- python3 train.py \
-   --... # Other Megatron/SGLang/slime arguments
-```
-
-### Argument Descriptions
-
-Arguments are divided into three categories:
-
-1.  **Megatron arguments**: slime reads all arguments set in Megatron via `PYTHONPATH`. You can configure Megatron by passing arguments like `--tensor-model-parallel-size 2`.
-2.  **SGLang arguments**: All arguments for the installed SGLang are supported. These arguments must be prefixed with `--sglang-`. For example, `--mem-fraction-static` should be passed as `--sglang-mem-fraction-static`.
-3.  **slime-specific arguments**: Please refer to: [slime/utils/arguments.py](slime/utils/arguments.py)
-
-For complete usage instructions, please refer to the [Usage Documentation](docs/en/usage.md).
-
-## Developer Guide
-
-  - **Contributions are welcome\!** If you have suggestions for new features, performance tuning, or feedback on user experience, feel free to submit an Issue or PR 😊
-
-  - Use [pre-commit](https://pre-commit.com/) to ensure code style consistency for your commits:
-
-    ```bash
-    apt install pre-commit -y
-    pre-commit install
-    ```
-
-  - For debugging tips, please refer to the [Debugging Guide](docs/en/debug.md)
-
-## Hardware Support
-- Nvidia: refer to this repo README
-- AMD: refer to the [tutorial](docs/en/amd_tutorial.md)
-
-## FAQ & Acknowledgements
-
-  - For frequently asked questions, please see the [Q\&A](docs/en/qa.md)
-  - Special thanks to the following projects & communities: SGLang, Megatron‑LM, mbridge, OpenRLHF, veRL, and others.
+If APRIL is useful for your work, please cite the APRIL paper and star the repo.  
+(TODO: add arXiv link)

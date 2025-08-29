@@ -309,11 +309,3 @@ ray job submit ... \
    ```bash
    --sglang-cuda-graph-bs 1 2 4 8 $(seq 16 8 256)
    ```
-
-### 异步训练
-
-当进行训推分离时，你会发现训练和推理的 GPU 总是相互等待着，为了避免这种资源空闲，我们可以开启异步训练。开启的方式即为将启动脚本中的 `train.py` 改变为 `train_async.py`。这样 slime 就会在进行当前 rollout 的训练时进行下一个 rollout 的数据生成了。
-
-`train.py` 和 `train_async.py` 的差别只在于 train loop 的同步逻辑，我们通过 ray 的异步（`.remote`, `ray.get`）实现了这点。
-
-⚠️  在异步训练时，sglang 的性能检测日志与训练日志可能会混到一起，不易区分，可以通过 `--sglang-log-level` 来减少 sglang 的日志。

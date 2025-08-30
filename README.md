@@ -1,119 +1,96 @@
-
-# APRIL: Active Partial Rollouts in Reinforcement Learning to Tame Long-Tail Generation
-
-[Chinese Version](./README_zh.md)
-
+# APRIL: Active Partial Rollouts in Reinforcement Learning to Tame Long-tail Generation
 ## About
+### Background: Why the sampling-training loop of synchronous RL is dragged down by the "long tail"
 
-### Background: Why synchronous RL sampling–training loops suffer from “long tails”
+In on-policy RLHF/GR?O training, the system enters an update phase only after collecting **N** rollout samples in a "round." Due to the inconsistent lengths of generated samples, the system has to wait for a few **long-tail samples** to complete before starting the training phase. This leads to decreased GPU utilization and lower throughput in the later stages of the rollout phase.
 
-- In on-policy RLHF / GRxO training, the system collects **N** rollout samples per round before applying one update. Because generation lengths, refusals/retries, routing queues, etc. are stochastic, the round time is dominated by **the slowest few samples** (a classic long-tail). GPUs idle while “waiting for the tail,” dragging down effective throughput.
-- Common mitigations (larger timeouts/early truncation, higher concurrency, faster decoding kernels/continuous batching, or switching to asynchronous RL) all have trade-offs: they may hurt sample quality or policy consistency, complicate scheduling assumptions, or still fail to remove the root cause—**wasted time waiting on unfinished samples**.
-### What we built: Active Partial Rollout (APRIL)
+### What We Did: Active Partial Rollout (APRIL)
 
-**Core idea.** In each round, **oversample by design** (**N' > N**). As soon as the target **N** is met, **proactively abort** straggling requests; persist their **unfinished response segments** (with context and decoding state) into a **cross-round buffer**; and **resume them first** in the next round. This eliminates idle time spent “waiting for the tail.”  
-(TODO: add architecture diagram)
+**Core Idea**: In each round, we **over-sample** (N' > N) and **actively interrupt** the remaining in-progress requests once the target of **N** completed samples is reached. The **unfinished responses** are stored in a **buffer** and are **prioritized for continued rollout** in the next round, thereby mitigating the efficiency degradation caused by long-tail requests.
 
 ![scheduling](./imgs/partial_scheduling.png)
-
 ### Highlights
 
-- **Long-tail killer.** Launch N' > N rollouts; once N is reached, immediately abort the remainder, **buffer their partial responses**, and **resume them next round**.
-- **Stable training.** Plays nicely with mainstream on-policy variants like PPO/GRPO/DAPO/GSPO; in practice we observe comparable or slightly better accuracy.
-- **Low-intrusion engineering.** Operates at the scheduling layer without changing decoding/batching kernels; integrated with **slime**, and works on both NVIDIA and AMD.
-- **Algorithm-compatible.** Resuming samples can introduce a small amount of “light off-policy,” which we have not found to destabilize training; it often acts as a mild regularizer (faster convergence, slight accuracy gains).
-## Quickstart
+-   **Over-sampling**: Assuming the training phase requires `rollout_batch_size=32` complete samples per round, we actually initiate a larger sampling request, i.e., `over_sampling_batch_size=64`.
+-   **Stop upon collection**: As soon as the number of collected complete sample groups reaches `rollout_batch_size`, an `abort` signal is immediately sent to the sglang router.
+-   **Collect and reuse**: Upon receiving the `abort` signal, sglang stops the ongoing generation tasks and returns their partially generated portions (half-completed trajectories). This partial data is not discarded but is stored in a buffer. When the next rollout round begins, they continue generating from where they left off, along with new prompts, thus achieving seamless reuse across iteration steps.
+-   **Elegant implementation**: Slime's partial rollout provides a more native and lightweight optimization solution that is less intrusive to the original pipeline. You can enable it out-of-the-box simply by setting the `--partial-rollout` flag and specifying `--over-sampling-batch-size`.
 
-### 1) Environment
+## Three Steps to Get Started
 
-**Recommended (Docker)**
+### 1) Environment Setup (Requires an AMD GPU)
 
-- **AMD**
-
+**Start docker**
 ```bash
 docker run --rm --gpus all --ipc=host --shm-size=16g \
   --ulimit memlock=-1 --ulimit stack=67108864 \
   -it rlsys/slime:slime_ubuntu22.04_rocm6.3.4-patch-numa-patch_sglang0.4.9_megatron-patch_ray2.47.1_apex_torch-memory-saver0.0.8-patch-vim /bin/bash
 ```
-
-- **NVIDIA** (TODO: fill in the matching image tag)
-
 ### 2) Install APRIL
 
 ```bash
-git clone https://github.com/RLsys-Foundation/APRIL.git
+git clone [https://github.com/RLsys-Foundation/APRIL.git](https://github.com/RLsys-Foundation/APRIL.git)
 cd APRIL
 pip install -e .
 ```
 
-If you plan to run the example scripts, make sure `ray` is installed and at least one inference backend is available (SGLang or vLLM; **SGLang recommended**).
+### 3) Run an Example
 
-### 3) Run an example
-
-_The script: starts the backend → launches oversampled rollouts → aborts once the target is met → writes unfinished samples to the buffer and resumes them next round → prints per-round throughput/latency._
+All scripts are in the `scripts/partial_rollout/` directory.
 
 ```bash
 bash scripts/partial_rollout/qwen/grpo/run-qwen3-4B-dapo-partial.sh
 ```
+### 4) Parameter Details
 
-### 4) Parameters
-
-APRIL’s core behavior is controlled by the following flags:
-
+The core functionality of partial rollout is controlled by the following parameters:
 ```bash
-# Enable partial rollout:
-# Turn on "meet target then abort" and reclaim unfinished samples into the buffer.
+# Enable the partial rollout feature
+# Set this parameter to enable the mechanism of stopping generation upon reaching the target count + recycling unfinished samples
 --partial-rollout
 
-# Sampling batch size per shot. This controls the granularity of each sampling step.
-# If this > rollout_batch_size, you will oversample.
-# If this < rollout_batch_size, the system keeps sampling in chunks until the target is reached.
+# The batch size for sampling. This parameter controls the sampling granularity per round.
+# If this parameter > rollout_batch_size, over-sampling is performed.
+# If this parameter < rollout_batch_size, sampling will continue at this granularity until rollout_batch_size samples are collected.
 --over-sampling-batch-size 16
 ```
+For other parameters, please refer to the arguments in [arguments.py](./slime/utils/arguments.py). For more details, you can consult the original [slime](https://github.com/THUDM/slime) repository.
+## Results and Comparison (Abridged)
 
-For other options, see the arguments in [arguments.py](https://chatgpt.com/c/slime/utils/arguments.py). For more details, refer to the upstream [slime](https://github.com/THUDM/slime) repository.
-
-## Results vs. Baselines (brief)
-
-|Dataset|Model|Metric|APRIL vs. baseline|
-|---|---|---|---|
-|DAPO-Math-17k|Qwen3-4B|Rollout Throughput|**+17%**|
-|DeepScaleR|Qwen3-4B|Rollout Throughput|**+21%**|
-|DeepMath-103K|Qwen3-4B|Rollout Throughput|**+35%**|
-|AIME-2024|Various|Final Accuracy|**+2–5%** (data/algorithm-dependent)|
+| Dataset       | Model    | Metric           | APRIL vs. Baseline    |
+|---------------|----------|------------------|-----------------------|
+| DAPO‑Math‑17k | Qwen3‑4B | Rollout Throughput | **+17%** |
+| DeepScaleR    | Qwen3‑4B | Rollout Throughput | **+21%** |
+| DeepMath‑103K | Qwen3‑4B | Rollout Throughput | **+35%** |
 
 ![evaluation](./imgs/eval_dapo_qwen.png)
-## FAQ
 
-- **Q: Does APRIL hurt policy purity or convergence?**  
-    **A:** We have not observed instability in engineering or experiments. Monitor the off-policy token ratio, and use a mild setting like `oversample ≈ 2× roll_batch`.
-    
-- **Q: Do I need to modify decoding kernels?**  
-    **A:** No. APRIL operates at the **scheduling layer** and composes with speculative decoding, continuous batching, and other inference-level accelerations.
-    
-- **Q: Does it work on both NVIDIA and AMD?**  
-    **A:** Yes; we reproduced gains on 8×H100 and 8×MI300.
-    
+## Frequently Asked Questions (FAQ)
 
-## Repository Structure
+-   **Q: Will APRIL affect policy purity and convergence?**
+    -   A: It will definitely have an impact on policy purity; the proportion of off-policy tokens in one round is about 40%. However, from both an engineering and experimental perspective, partial rollout has not introduced significant instability under the current settings. Further verification is needed for tasks with a much larger `max_response_length` (e.g., agent tasks, multi-turn tasks).
 
-```text
+-   **Q: Are changes to the decoding kernel required?**
+    -   A: No. APRIL operates at the **system scheduling layer** and does not conflict with inference acceleration techniques like speculative decoding or continuous batching. Instead, they are complementary and can be stacked.
+
+## Directory Structure
+
+```
 APRIL/
 ├── scripts/
 │   └── partial_rollout/
-│       ├── deepseek/            # Experiment code for deepseek-r1-distill-1.5B
-│       └── qwen/                # Experiment code for Qwen3-4B
+│       ├── deepseek/               # Experiment code for deepseek-r1-distill-1.5B
+│       └── qwen/                   # Experiment code for qwen3-4B
 ├── slime/
 │   ├── backends/
 │   ├── rollout/
-│   │   └── sglang_example.py    # Core sampling example
-│   ├── ray/                     # Core scheduling logic
-│   │   └── buffer.py            # Buffer implementation
+│   │   └── sglang_example.py       # Core sampling code
+│   ├── ray/                      # Core scheduling logic
+│   │   └── buffer.py             # Buffer implementation code
 │   └── utils/
-└── tools/                       # Megatron-format model conversion
+└── tools/                        # Megatron format conversion tools
+
 ```
+## Paper
 
-## Citation
-
-If APRIL is useful for your work, please cite the APRIL paper and star the repo.  
-(TODO: add arXiv link)
+(TODO: arXiv link for the paper)

@@ -158,3 +158,13 @@ def process_rollout_data(rollout_id, args, data_buffer, dp_rank, dp_size, rollou
 
         # save the data to local storage
         rollout_data[key] = val
+
+    if "rollout_time" in data:
+        rollout_data["rollout_time"] = data["rollout_time"]
+    # Handle completion tokens statistics from this round
+    if "completion_tokens_stats" in data:
+        rollout_data["completion_tokens_stats"] = data["completion_tokens_stats"]
+    if "partial_samples" in data:
+        rollout_data["partial_samples"] = data["partial_samples"]
+    if "total_off_policy_tokens" in data:
+        rollout_data["total_off_policy_tokens"] = data["total_off_policy_tokens"]

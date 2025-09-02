@@ -206,6 +206,15 @@ class Buffer:
         """
         Convert inference generated samples to training data.
         """
+        if samples[0].metadata and "rollout_time" in samples[0].metadata:
+            rollout_time = samples[0].metadata["rollout_time"]
+        if samples[0].metadata and "completion_tokens_stats" in samples[0].metadata:
+            completion_tokens_stats = samples[0].metadata["completion_tokens_stats"]
+        if samples[0].metadata and "partial_samples" in samples[0].metadata:
+            partial_samples = samples[0].metadata["partial_samples"]
+        if samples[0].metadata and "total_off_policy_tokens" in samples[0].metadata:
+            total_off_policy_tokens = samples[0].metadata["total_off_policy_tokens"]
+        samples = sorted(samples, key=lambda x: x.index)
         train_data = {
             "tokens": [sample.tokens for sample in samples],
             "response_lengths": [sample.response_length for sample in samples],
@@ -238,6 +247,10 @@ class Buffer:
         # For rollout buffer
         if samples[0].metadata and "round_number" in samples[0].metadata:
             train_data["round_number"] = [sample.metadata["round_number"] for sample in samples]
+        train_data["rollout_time"] = rollout_time
+        train_data["completion_tokens_stats"] = completion_tokens_stats
+        train_data["partial_samples"] = partial_samples
+        train_data["total_off_policy_tokens"] = total_off_policy_tokens
         return train_data
 
     def _set_data(self, data: Union[list[Sample], Any], evaluation=False):

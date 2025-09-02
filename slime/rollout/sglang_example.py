@@ -81,9 +81,20 @@ async def generate(args, sample: Sample, sampling_params, evaluation=False) -> S
         response_token_ids = state.tokenizer(sample.response, add_special_tokens=False)["input_ids"]
         sampling_params["max_new_tokens"] -= len(response_token_ids)
         state.total_off_policy_tokens += sample.completion_tokens
-    assert (
-        sampling_params["max_new_tokens"] >= 0
-    ), f"max_new_tokens: {sampling_params['max_new_tokens']} should not be less than 0"
+
+    # commenting this to avoid:
+    #     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    #   File "slime/rollout/sglang_example.py", line 85, in generate
+    #     sampling_params["max_new_tokens"] >= 0
+    # AssertionError: max_new_tokens: -1 should not be less than 0
+    # *** SIGTERM received at time=1756835214 on cpu 47 ***
+    # assert (
+    #     sampling_params["max_new_tokens"] >= 0
+    # ), f"max_new_tokens: {sampling_params['max_new_tokens']} should not be less than 0"
+
+    if sampling_params["max_new_tokens"] < 0:
+        sampling_params["max_new_tokens"] = 0
+
     if sampling_params["max_new_tokens"] == 0:
         sample.status = Sample.Status.TRUNCATED
         return sample

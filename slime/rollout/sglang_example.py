@@ -184,7 +184,7 @@ async def abort(args, rollout_id: int, data_buffer):
         print(f"Abort request for {url}", flush=True)
         # await post(f"{url}/abort_request", {"abort_all": True}, use_http2=False)
         # based on https://github.com/THUDM/slime/pull/63/files
-        await post(f"{url}/abort_request", {"rid":"", "abort_all": True}, use_http2=False)
+        await post(f"{url}/abort_request", {"rid": "", "abort_all": True}, use_http2=False)
 
     # make sure all the pending tasks are finished
     count = 0
@@ -281,26 +281,28 @@ async def generate_rollout_async(args, rollout_id: int, data_buffer) -> list[lis
 
     assert len(data) == args.rollout_batch_size, f"Got {len(data)} samples, expected {args.rollout_batch_size}"
     data = sorted(data, key=lambda group: group[0].index)
-    
+
     rollout_time = time.time() - state.rollout_start_time
 
     completion_tokens_stats = {}
     if state.completion_tokens_list:
         completion_tokens_array = np.array(state.completion_tokens_list)
         completion_tokens_stats = {
-            'total_completion_tokens': np.sum(completion_tokens_array).item(),
-            'completion_tokens_mean': np.mean(completion_tokens_array).item(),
-            'completion_tokens_std': np.std(completion_tokens_array).item(),
-            'completion_tokens_count': len(completion_tokens_array),
+            "total_completion_tokens": np.sum(completion_tokens_array).item(),
+            "completion_tokens_mean": np.mean(completion_tokens_array).item(),
+            "completion_tokens_std": np.std(completion_tokens_array).item(),
+            "completion_tokens_count": len(completion_tokens_array),
         }
 
     if len(data) > 0:
-        data[0][0].metadata.update({
-            'rollout_time': rollout_time,
-            'completion_tokens_stats': completion_tokens_stats,
-            'partial_samples': state.partial_samples_count,
-            'total_off_policy_tokens': state.total_off_policy_tokens,
-        })
+        data[0][0].metadata.update(
+            {
+                "rollout_time": rollout_time,
+                "completion_tokens_stats": completion_tokens_stats,
+                "partial_samples": state.partial_samples_count,
+                "total_off_policy_tokens": state.total_off_policy_tokens,
+            }
+        )
     if completion_tokens_stats:
         print(f"[DEBUG] Rollout {rollout_id}: Completion tokens stats: {completion_tokens_stats}", flush=True)
 

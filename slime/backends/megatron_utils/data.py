@@ -161,7 +161,15 @@ def log_rollout_data(rollout_id, args, rollout_data):
         log_dict = {}
         response_lengths = rollout_data["response_lengths"]
         for key, val in rollout_data.items():
-            if key == "tokens" or key == "loss_masks" or key == "sample_indices"or key == "rollout_time" or key == "completion_tokens_stats" or key == "partial_samples" or key == "total_off_policy_tokens":
+            if (
+                key == "tokens"
+                or key == "loss_masks"
+                or key == "sample_indices"
+                or key == "rollout_time"
+                or key == "completion_tokens_stats"
+                or key == "partial_samples"
+                or key == "total_off_policy_tokens"
+            ):
                 continue
             # Upload per sample mean for each rollout value
             # There are the following assumptions:
@@ -235,7 +243,9 @@ def log_partial_rollout_data(rollout_id, args, rollout_data):
         total_off_policy_tokens = rollout_data["total_off_policy_tokens"]
         if total_off_policy_tokens is not None:
             log_dict["total_off_policy_tokens"] = total_off_policy_tokens
-            log_dict["off_policy_ratio"] = total_off_policy_tokens / (log_dict["total_tokens"] + total_off_policy_tokens)
+            log_dict["off_policy_ratio"] = total_off_policy_tokens / (
+                log_dict["total_tokens"] + total_off_policy_tokens
+            )
 
         response_lengths = rollout_data["response_lengths"]
 
@@ -285,7 +295,6 @@ def log_partial_rollout_data(rollout_id, args, rollout_data):
                 dst=mpu.get_data_parallel_src_rank(with_context_parallel=True),
                 group=mpu.get_data_parallel_group(with_context_parallel=True),
             )
-            
 
 
 def log_multi_turn_data(rollout_id, args, rollout_data):

@@ -98,6 +98,7 @@ def get_sum_of_sample_mean(
 
     return sum_of_sample_mean if not calculate_per_token_loss else sum_of_token
 
+
 def all_gather_with_cp(tensor: torch.Tensor, total_length: int, response_length: int):
     """
     Gather tensors across all ranks in the context parallel group.

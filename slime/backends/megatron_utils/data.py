@@ -13,7 +13,7 @@ import wandb
 from slime.utils.flops_utils import calculate_fwd_flops
 from slime.utils.seqlen_balancing import get_seqlen_balanced_partitions
 from slime.utils.timer import Timer
-
+from .cp_utils import slice_with_cp
 from ..utils.data import DataIterator, get_minimum_num_micro_batch_size
 
 
@@ -32,20 +32,7 @@ def get_batch(data_iterator, keys):
     batch["unconcat_tokens"] = tokens
 
     cp_size = mpu.get_context_parallel_world_size()
-    cp_rank = mpu.get_context_parallel_rank()
-    if cp_size > 1:
-
-        def pad_and_split_tokens(tokens: list[torch.Tensor]):
-            # pad
-            chunk_size = (len(tokens) + 2 * cp_size - 1) // (2 * cp_size)
-            pad = 2 * cp_size * chunk_size - len(tokens)
-            tokens = F.pad(tokens, (0, pad), value=pad_token_id)
-            # get 2 chunk for thd cp
-            start_1, end_1 = chunk_size * cp_rank, chunk_size * (cp_rank + 1)
-            start_2, end_2 = chunk_size * (2 * cp_size - cp_rank - 1), chunk_size * (2 * cp_size - cp_rank)
-            return torch.cat([tokens[start_1:end_1], tokens[start_2:end_2]])
-
-        tokens = [pad_and_split_tokens(t) for t in tokens]
+    tokens = [slice_with_cp(t, pad_token_id) for t in tokens]
 
     cu_seqlens = [0]
     for t in tokens:
